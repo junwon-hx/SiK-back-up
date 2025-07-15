@@ -1,0 +1,59 @@
+const puppeteer = require('puppeteer-extra'); 
+const StealthPlugin = require('puppeteer-extra-plugin-stealth'); 
+const fs = require('fs'); 
+ 
+puppeteer.use(StealthPlugin()); 
+ 
+(async () => { 
+  const browser = await puppeteer.launch({ 
+    headless: true, 
+    defaultViewport: { width: 1280, height: 1024 } 
+  }); 
+ 
+  const page = await browser.newPage(); 
+ 
+  console.log("Navigating to Zigbang..."); 
+  await page.goto('https://www.zigbang.com/home/oneroom', { 
+    waitUntil: 'networkidle2', 
+    timeout: 0 
+  }); 
+ 
+  // Scroll slowly to trigger data load 
+  for (let i = 0; i < 3; i++) { 
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight)); 
+    await new Promise(resolve => setTimeout(resolve, 3000)); 
+  } 
+ 
+  // Wait up to 15 seconds for listings to appear 
+  try { 
+    await page.waitForSelector('a[href*="/home/oneroom/items/"]', { timeout: 15000 }); 
+  } catch (err) { 
+    console.error("Listings never appeared. Try interacting with the map manually or change location."); 
+    await browser.close(); 
+    process.exit(1); 
+  } 
+ 
+  console.log("Extracting listings..."); 
+  const listings = await page.evaluate(() => { 
+    const anchors = document.querySelectorAll('a[href*="/home/oneroom/items/"]'); 
+    const results = []; 
+ 
+    anchors.forEach(a => { 
+      const title = a.querySelector('div[class*="Title"]')?.innerText || ''; 
+      const price = a.querySelector('div[class*="Price"]')?.innerText || ''; 
+      const url = a.href; 
+      if (url && title && price) { 
+        results.push({ title, price, url }); 
+      } 
+    }); 
+ 
+    return results; 
+  }); 
+ 
+  console.log(‘Found ${listings.length} listings.`); 
+ 
+  fs.writeFileSync('zigbang_listings.json', JSON.stringify(listings, null, 2), 'utf-8'); 
+  console.log('Saved to zigbang_listings.json'); 
+ 
+  await browser.close(); 
+})(); 
